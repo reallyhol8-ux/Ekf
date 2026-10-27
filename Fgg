@@ -1,0 +1,1949 @@
+-- ห้ามก๊อปของกู อยากได้ก็ทำเอง
+
+-- Token Hub UI + Admin Panel
+-- ใส่เป็น LocalScript ใน StarterGui
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+
+-- ตั้งค่า
+local WIN_SIZE = Vector2.new(620, 380)
+local PILL_SIZE = Vector2.new(124, 40)
+local HEADER = 64
+local COIN = 32
+local KEY = Enum.KeyCode.T
+local FONT = Enum.Font.Arcade
+
+-- รอบวัน (วินาที)
+local DAY_SEC = 30
+local NIGHT_SEC = 30
+local CYCLE = DAY_SEC + NIGHT_SEC
+local TWILIGHT = 2
+local CLOUD_SPEED = 3.5
+
+local C = {
+	neon = "#b026ff",
+	neon2 = "#d266ff",
+	sky1 = "#81c2ec",
+	sky2 = "#a8d8ef",
+	grass = "#579a3d",
+	grass2 = "#76b365",
+	dirt = "#6b4423",
+	dirt2 = "#614d1b",
+	pill = "#3b2512",
+	yellow = "#fcd000",
+	yellow2 = "#8a6d00",
+}
+
+local tPop = TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local tMove = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local tFade = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local tOut = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+
+local function col(h)
+	return Color3.fromHex(h)
+end
+
+local function make(class, props, parent)
+	local obj = Instance.new(class)
+	for k, v in props do
+		obj[k] = v
+	end
+	obj.Parent = parent
+	return obj
+end
+
+local function drawPixels(parent, gw, gh, layers, list)
+	local f = make("Frame", {
+		Name = "Pixels",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+	}, parent)
+	for i, layer in layers do
+		for _, r in layer.rects do
+			local piece = make("Frame", {
+				BackgroundColor3 = col(layer.color),
+				BorderSizePixel = 0,
+				Position = UDim2.fromScale(r[1] / gw, r[2] / gh),
+				Size = UDim2.fromScale(r[3] / gw, r[4] / gh),
+				ZIndex = i,
+			}, f)
+			if list then
+				table.insert(list, { f = piece, base = piece.BackgroundColor3 })
+			end
+		end
+	end
+	return f
+end
+
+local function box(parent, name, w, h, anchor, pos, z)
+	return make("Frame", {
+		Name = name,
+		BackgroundTransparency = 1,
+		AnchorPoint = anchor,
+		Position = pos,
+		Size = UDim2.fromOffset(w, h),
+		ZIndex = z,
+	}, parent)
+end
+
+local function bevel(parent, lightSize, darkSize, light, dark, lightTrans, darkTrans)
+	local function strip(name, color, trans, pos, size)
+		make("Frame", {
+			Name = name,
+			BackgroundColor3 = col(color),
+			BackgroundTransparency = trans,
+			BorderSizePixel = 0,
+			Position = pos,
+			Size = size,
+			ZIndex = 40,
+		}, parent)
+	end
+	strip("BevelTop", light, lightTrans, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, lightSize))
+	strip("BevelLeft", light, lightTrans, UDim2.fromOffset(0, 0), UDim2.new(0, lightSize, 1, 0))
+	strip("BevelBottom", dark, darkTrans, UDim2.new(0, 0, 1, -darkSize), UDim2.new(1, 0, 0, darkSize))
+	strip("BevelRight", dark, darkTrans, UDim2.new(1, -darkSize, 0, 0), UDim2.new(0, darkSize, 1, 0))
+end
+
+local function makeBtn(parent, name, text, fill, light, dark, border, x)
+	local base = col(fill)
+	local hover = base:Lerp(Color3.new(1, 1, 1), 0.2)
+	local b = make("TextButton", {
+		Name = name,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, x, 0, 6),
+		Size = UDim2.fromOffset(24, 20),
+		BackgroundColor3 = base,
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		Text = text,
+		Font = FONT,
+		TextSize = 16,
+		TextColor3 = Color3.new(1, 1, 1),
+		ZIndex = 30,
+	}, parent)
+	make("UIStroke", {
+		Color = col(border),
+		Thickness = 2,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, b)
+	bevel(b, 2, 2, light, dark, 0, 0)
+	b.MouseEnter:Connect(function()
+		TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = hover }):Play()
+	end)
+	b.MouseLeave:Connect(function()
+		TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = base }):Play()
+	end)
+	return b
+end
+
+local function tint(list, target, amount)
+	for _, item in list do
+		item.f.BackgroundColor3 = item.base:Lerp(target, amount)
+	end
+end
+
+-- ข้อมูลพิกเซลอาร์ต
+local sunArt = {
+	{
+		color = "#ffd54a",
+		rects = {
+			{ 6, 0, 4, 1 }, { 4, 1, 8, 1 }, { 2, 2, 12, 1 }, { 1, 3, 14, 1 }, { 1, 4, 14, 1 },
+			{ 0, 5, 16, 5 }, { 1, 10, 14, 1 }, { 1, 11, 14, 1 }, { 2, 12, 12, 1 }, { 4, 13, 8, 1 }, { 6, 14, 4, 1 },
+		},
+	},
+	{ color = "#ffeb3b", rects = { { 5, 2, 4, 2 }, { 4, 4, 3, 2 } } },
+}
+
+local moonArt = {
+	{
+		color = "#e8ecf5",
+		rects = {
+			{ 4, 0, 6, 1 }, { 2, 1, 10, 1 }, { 1, 2, 12, 2 }, { 0, 4, 14, 6 },
+			{ 1, 10, 12, 2 }, { 2, 12, 10, 1 }, { 4, 13, 6, 1 },
+		},
+	},
+	{ color = "#c9d0e4", rects = { { 12, 2, 1, 2 }, { 12, 4, 2, 6 }, { 12, 10, 1, 2 }, { 11, 12, 1, 1 } } },
+	{ color = "#b4bdd6", rects = { { 3, 3, 2, 2 }, { 8, 6, 2, 2 }, { 4, 8, 1, 1 }, { 9, 3, 1, 1 }, { 6, 10, 2, 1 } } },
+	{ color = "#ffffff", rects = { { 3, 1, 2, 1 }, { 2, 2, 1, 1 } } },
+}
+
+local bigCloudArt = {
+	{ color = "#ffffff", rects = { { 6, 0, 6, 1 }, { 3, 1, 12, 1 }, { 1, 2, 17, 1 }, { 0, 3, 20, 3 } } },
+	{ color = "#e8e8e8", rects = { { 0, 6, 20, 1 } } },
+}
+
+local smallCloudArt = {
+	{ color = "#ffffff", rects = { { 3, 0, 5, 1 }, { 1, 1, 10, 1 }, { 0, 2, 12, 2 } } },
+}
+
+local coinEdge = {
+	color = "#b8860b",
+	rects = {
+		{ 5, 0, 6, 1 }, { 3, 1, 10, 1 }, { 2, 2, 12, 1 }, { 1, 3, 14, 1 }, { 0, 4, 16, 8 },
+		{ 1, 12, 14, 1 }, { 2, 13, 12, 1 }, { 3, 14, 10, 1 }, { 5, 15, 6, 1 },
+	},
+}
+local coinGold = {
+	color = "#ffd54a",
+	rects = {
+		{ 5, 1, 6, 1 }, { 4, 2, 8, 1 }, { 2, 3, 12, 1 }, { 1, 4, 14, 8 },
+		{ 2, 12, 12, 1 }, { 4, 13, 8, 1 }, { 5, 14, 6, 1 },
+	},
+}
+
+local coinFrontArt = {
+	coinEdge,
+	coinGold,
+	{ color = "#ffeb3b", rects = { { 4, 3, 3, 1 }, { 3, 4, 2, 2 }, { 4, 6, 1, 1 } } },
+	{ color = "#e6a817", rects = { { 11, 9, 3, 2 }, { 10, 11, 4, 1 }, { 9, 12, 3, 1 } } },
+	{ color = "#b8860b", rects = { { 5, 5, 6, 1 }, { 7, 6, 2, 5 } } },
+	{ color = "#ffffff", rects = { { 4, 4, 1, 1 } } },
+}
+
+local coinBackArt = {
+	coinEdge,
+	coinGold,
+	{
+		color = "#b8860b",
+		rects = {
+			{ 7, 7, 2, 2 }, { 5, 5, 1, 1 }, { 10, 5, 1, 1 }, { 5, 10, 1, 1 }, { 10, 10, 1, 1 },
+			{ 7, 4, 2, 1 }, { 7, 11, 2, 1 }, { 4, 7, 1, 2 }, { 11, 7, 1, 2 },
+		},
+	},
+	{ color = "#ffeb3b", rects = { { 4, 3, 2, 1 }, { 3, 4, 1, 1 } } },
+}
+
+local coins = {}
+
+local function makeCoin(parent, owner, pos, z)
+	local f = box(parent, "Coin", COIN, COIN, Vector2.new(0.5, 0.5), pos, z)
+	local spin = box(f, "Spin", COIN, COIN, Vector2.new(0.5, 0.5), UDim2.fromScale(0.5, 0.5), 1)
+	local front = drawPixels(spin, 16, 16, coinFrontArt)
+	local back = drawPixels(spin, 16, 16, coinBackArt)
+	front.Name = "Front"
+	back.Name = "Back"
+	table.insert(coins, { spin = spin, front = front, back = back, owner = owner })
+	return f
+end
+
+-- สร้าง gui
+local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local oldGui = playerGui:FindFirstChild("TokenHub")
+if oldGui then
+	oldGui:Destroy()
+end
+
+local gui = make("ScreenGui", {
+	Name = "TokenHub",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, playerGui)
+
+local uiPos = Vector2.zero
+local introBusy, confirmOpen, removing = false, false, false
+local function blocked()
+	return introBusy or confirmOpen or removing
+end
+
+local conns = {}
+
+local RAINBOW = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+	ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 200, 0)),
+	ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 70)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 220, 255)),
+	ColorSequenceKeypoint.new(0.67, Color3.fromRGB(60, 80, 255)),
+	ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 220)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
+})
+local rainbows = {}
+local function rainbow(stroke)
+	local g = make("UIGradient", { Color = RAINBOW }, stroke)
+	table.insert(rainbows, g)
+	return g
+end
+
+local onUiMoved = nil
+
+local function makePanel(name, size, radius, strokeColor)
+	local holder = make("Frame", {
+		Name = name,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(size.X, size.Y),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, gui)
+	local holderCorner = make("UICorner", { CornerRadius = radius }, holder)
+	local stroke = make("UIStroke", {
+		Color = strokeColor,
+		Thickness = 2,
+		Transparency = 1,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, holder)
+	local scale = make("UIScale", { Scale = 0.8 }, holder)
+	local canvas = make("CanvasGroup", {
+		Name = "Canvas",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = col(C.dirt),
+		BorderSizePixel = 0,
+		GroupTransparency = 1,
+	}, holder)
+	local canvasCorner = make("UICorner", { CornerRadius = radius }, canvas)
+	local p = {
+		holder = holder, canvas = canvas, stroke = stroke, scale = scale,
+		size = size, token = 0, corners = { holderCorner, canvasCorner },
+	}
+	function p:center()
+		return uiPos + self.size / 2
+	end
+	function p:target()
+		local c = self:center()
+		return UDim2.fromOffset(c.X, c.Y)
+	end
+	function p:place()
+		self.holder.Position = self:target()
+	end
+	function p:show(from)
+		self.token += 1
+		local h = self.holder
+		if not h.Visible then
+			self.canvas.GroupTransparency = 1
+			self.stroke.Transparency = 1
+			self.scale.Scale = from and 0.3 or 0.8
+			if from then
+				h.Position = UDim2.fromOffset(from.X, from.Y)
+			else
+				self:place()
+			end
+			h.Visible = true
+		end
+		TweenService:Create(self.scale, tPop, { Scale = 1 }):Play()
+		TweenService:Create(h, tMove, { Position = self:target() }):Play()
+		TweenService:Create(self.canvas, tFade, { GroupTransparency = 0 }):Play()
+		TweenService:Create(self.stroke, tFade, { Transparency = 0 }):Play()
+	end
+	function p:hide(to)
+		self.token += 1
+		local mine = self.token
+		local h = self.holder
+		TweenService:Create(self.scale, tOut, { Scale = to and 0.3 or 0.85 }):Play()
+		TweenService:Create(self.canvas, tOut, { GroupTransparency = 1 }):Play()
+		TweenService:Create(self.stroke, tOut, { Transparency = 1 }):Play()
+		local goal = to and UDim2.fromOffset(to.X, to.Y) or self:target()
+		local mv = TweenService:Create(h, tOut, { Position = goal })
+		mv.Completed:Connect(function()
+			if self.token == mine then
+				h.Visible = false
+			end
+		end)
+		mv:Play()
+	end
+	return p
+end
+
+local win = makePanel("Window", WIN_SIZE, UDim.new(0, 8), Color3.new(1, 1, 1))
+rainbow(win.stroke)
+local pill = makePanel("Pill", PILL_SIZE, UDim.new(1, 0), col(C.yellow))
+pill.canvas.BackgroundColor3 = col(C.pill)
+
+TweenService:Create(
+	win.stroke,
+	TweenInfo.new(1.75, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+	{ Thickness = 3 }
+):Play()
+
+-- ===== หน้าต่าง =====
+local wc = win.canvas
+local W = WIN_SIZE.X
+
+local header = make("Frame", {
+	Name = "Header",
+	Size = UDim2.new(1, 0, 0, HEADER),
+	BackgroundColor3 = Color3.new(1, 1, 1),
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+}, wc)
+local sky = make("UIGradient", {
+	Rotation = 90,
+	Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, col(C.sky1)),
+		ColorSequenceKeypoint.new(0.7, col(C.sky2)),
+		ColorSequenceKeypoint.new(1, col(C.sky2)),
+	}),
+}, header)
+
+local stars = {}
+local rng = Random.new(11)
+for i = 1, 20 do
+	local s = rng:NextInteger(2, 3)
+	stars[i] = make("Frame", {
+		Name = "Star",
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(rng:NextInteger(4, W - 8), rng:NextInteger(3, 34)),
+		Size = UDim2.fromOffset(s, s),
+		ZIndex = 1,
+	}, header)
+end
+
+local SUN_W, MOON_W = 32, 28
+local sun = box(header, "Sun", SUN_W, 30, Vector2.zero, UDim2.fromOffset(-40, 46), 2)
+drawPixels(sun, 16, 15, sunArt)
+
+local moon = box(header, "Moon", MOON_W, 28, Vector2.zero, UDim2.fromOffset(-40, 46), 2)
+drawPixels(moon, 14, 14, moonArt)
+moon.Visible = false
+
+local cloudDefs = {
+	{ art = bigCloudArt, gw = 20, gh = 7, px = 2, y = 8, speed = 4, x0 = 300 },
+	{ art = smallCloudArt, gw = 12, gh = 4, px = 4, y = 4, speed = 6, x0 = 100 },
+	{ art = bigCloudArt, gw = 20, gh = 7, px = 3, y = 22, speed = 9, x0 = 220 },
+}
+local clouds = {}
+for i, d in cloudDefs do
+	local w, h = d.gw * d.px, d.gh * d.px
+	local f = box(header, "Cloud" .. i, w, h, Vector2.zero, UDim2.fromOffset(0, d.y), 3)
+	local pieces = {}
+	drawPixels(f, d.gw, d.gh, d.art, pieces)
+	table.insert(clouds, { frame = f, w = w, y = d.y, speed = d.speed * CLOUD_SPEED, x0 = d.x0, pieces = pieces })
+end
+
+local grass = make("Frame", {
+	Name = "Grass",
+	Position = UDim2.new(0, 0, 1, -12),
+	Size = UDim2.new(1, 0, 0, 12),
+	BackgroundTransparency = 1,
+	ZIndex = 4,
+}, header)
+local grassPieces = {}
+local function grassBlock(color, pos, size)
+	local f = make("Frame", {
+		BackgroundColor3 = col(color),
+		BorderSizePixel = 0,
+		Position = pos,
+		Size = size,
+	}, grass)
+	table.insert(grassPieces, { f = f, base = f.BackgroundColor3 })
+	return f
+end
+grassBlock(C.grass2, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 2))
+grassBlock(C.grass, UDim2.fromOffset(0, 2), UDim2.new(1, 0, 0, 3))
+make("Frame", {
+	BackgroundColor3 = col(C.dirt), BorderSizePixel = 0,
+	Position = UDim2.fromOffset(0, 5), Size = UDim2.new(1, 0, 0, 7),
+}, grass)
+local rng2 = Random.new(5)
+for x = 0, W, 6 do
+	if rng2:NextNumber() < 0.55 then
+		grassBlock("#86c773", UDim2.fromOffset(x, 0), UDim2.fromOffset(3, 2))
+	end
+	if rng2:NextNumber() < 0.5 then
+		grassBlock("#46802f", UDim2.fromOffset(x + 2, 2), UDim2.fromOffset(3, 3))
+	end
+end
+
+local iconBox = make("Frame", {
+	Name = "IconBox",
+	Position = UDim2.fromOffset(8, 6),
+	Size = UDim2.fromOffset(40, 40),
+	BackgroundColor3 = col("#46301a"),
+	BorderSizePixel = 0,
+	ZIndex = 8,
+}, header)
+make("UIStroke", {
+	Color = col("#1b1208"),
+	Thickness = 2,
+	ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+}, iconBox)
+bevel(iconBox, 2, 2, "#d8d1c0", "#6a5a44", 0, 0)
+local iconPop = make("UIScale", { Scale = 1 }, iconBox)
+local iconCoin = makeCoin(iconBox, win.holder, UDim2.fromScale(0.5, 0.5), 1)
+local coinPop = make("UIScale", { Scale = 1 }, iconCoin)
+
+local titleLabels = {}
+local function titleLayer(name, color, off, z, trans)
+	local label = make("TextLabel", {
+		Name = name,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 58 + off, 0, 26 + off),
+		Size = UDim2.fromOffset(300, 24),
+		BackgroundTransparency = 1,
+		Text = "TOKEN HUB",
+		Font = FONT,
+		TextSize = 22,
+		TextColor3 = color,
+		TextTransparency = trans or 0,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = z,
+	}, header)
+	table.insert(titleLabels, label)
+	return label
+end
+titleLayer("Shadow", Color3.new(0, 0, 0), 5, 10, 0.65)
+titleLayer("Side3", col("#5c4900"), 3, 11)
+titleLayer("Side2", col(C.yellow2), 2, 12)
+titleLayer("Side1", col("#b38f00"), 1, 13)
+local mainTitle = titleLayer("Title", col(C.yellow), 0, 14)
+make("UIStroke", {
+	Color = col("#3b2a00"),
+	Thickness = 1,
+	ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+}, mainTitle)
+
+local dragHeader = make("TextButton", {
+	Name = "Drag",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 20,
+}, header)
+
+local minBtn = makeBtn(header, "Min", "-", "#8a8a8a", "#c8c8c8", "#4a4a4a", "#222222", -34)
+local closeBtn = makeBtn(header, "Close", "X", "#c62828", "#f27878", "#7a1010", "#3d0808", -6)
+local minPop = make("UIScale", { Scale = 1 }, minBtn)
+local closePop = make("UIScale", { Scale = 1 }, closeBtn)
+
+local introCover = make("Frame", {
+	Name = "IntroCover",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = col(C.dirt),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ZIndex = 6,
+}, header)
+
+local body = make("Frame", {
+	Name = "Body",
+	BackgroundTransparency = 1,
+	Position = UDim2.fromOffset(0, HEADER),
+	Size = UDim2.new(1, 0, 1, -HEADER),
+}, wc)
+
+make("Frame", {
+	Name = "Line",
+	BackgroundColor3 = col(C.dirt2),
+	BorderSizePixel = 0,
+	Size = UDim2.new(1, 0, 0, 3),
+}, body)
+
+local bodyCover = make("Frame", {
+	Name = "IntroCover",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = col(C.dirt),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ZIndex = 50,
+}, body)
+
+local content = make("Frame", {
+	Name = "Content",
+	BackgroundTransparency = 1,
+	Position = UDim2.fromOffset(0, 3),
+	Size = UDim2.new(1, 0, 1, -3),
+}, body)
+
+-- ============================================================
+-- ADMIN PANEL (ใส่ใน content)
+-- ============================================================
+local LP = Players.LocalPlayer
+
+local AD = {
+	card    = "#4a2f1a",
+	txt     = "#ffe9a8",
+	txtDim  = "#a8895c",
+	green   = "#5aaa3e",
+	red     = "#b83a3a",
+	accent  = C.yellow,
+	dark    = "#2a1a0c",
+	border  = "#1b1208",
+	side    = "#2e1d0e",
+	sideBtn = "#3a2414",
+}
+
+local States = {
+	fly = false, flySpeed = 50,
+	walkSpeed = 16,
+	infiniteJump = false,
+	noclip = false, waypoint = false,
+	invisible = false, godmode = false,
+	espPlayers = false, xray = false, espBots = false,
+	hitboxSize = 1,
+	lockPlayers = false, lockBots = false,
+	vacuumPower = 1,
+	lowGraphics = false, clayGraphics = false, brightness = 0,
+}
+
+local ActiveConns = {}
+local function cleanup(name)
+	if ActiveConns[name] then
+		pcall(function() ActiveConns[name]:Disconnect() end)
+		ActiveConns[name] = nil
+	end
+end
+
+-- WIDGETS
+local function makeCard(parent, h)
+	local card = make("Frame", {
+		Size = UDim2.new(1, 0, 0, h),
+		BackgroundColor3 = col(AD.card),
+		BorderSizePixel = 0,
+	}, parent)
+	make("UICorner", { CornerRadius = UDim.new(0, 6) }, card)
+	make("UIStroke", {
+		Color = col(AD.border), Thickness = 2,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, card)
+	bevel(card, 2, 2, "#c8a878", "#2a1a0c", 0, 0)
+	return card
+end
+
+local function makeToggle(parent, label, sub, id, onChange)
+	local card = makeCard(parent, sub and 52 or 42)
+	make("TextLabel", {
+		Position = UDim2.fromOffset(10, sub and 6 or 0),
+		Size = UDim2.new(1, -66, 0, sub and 20 or 42),
+		BackgroundTransparency = 1,
+		Text = label, Font = FONT, TextSize = 14, TextColor3 = col(AD.txt),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = sub and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+	}, card)
+	if sub then
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 26),
+			Size = UDim2.new(1, -66, 0, 18),
+			BackgroundTransparency = 1,
+			Text = sub, Font = FONT, TextSize = 10, TextColor3 = col(AD.txtDim),
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, card)
+	end
+	local swBg = make("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromOffset(40, 20),
+		BackgroundColor3 = col(AD.dark),
+		BorderSizePixel = 0,
+	}, card)
+	make("UICorner", { CornerRadius = UDim.new(1, 0) }, swBg)
+	make("UIStroke", {
+		Color = col(AD.border), Thickness = 1,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, swBg)
+	local knob = make("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 2, 0.5, 0),
+		Size = UDim2.fromOffset(16, 16),
+		BackgroundColor3 = col("#8a6d3a"),
+		BorderSizePixel = 0,
+	}, swBg)
+	make("UICorner", { CornerRadius = UDim.new(1, 0) }, knob)
+	local btn = make("TextButton", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1, Text = "",
+	}, card)
+	local on = States[id] or false
+	local function render(v)
+		on = v; States[id] = v
+		TweenService:Create(swBg, tFade, {
+			BackgroundColor3 = v and col(AD.green) or col(AD.dark)
+		}):Play()
+		TweenService:Create(knob, tFade, {
+			Position = v and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+			BackgroundColor3 = v and Color3.new(1, 1, 1) or col("#8a6d3a"),
+		}):Play()
+	end
+	render(on)
+	btn.Activated:Connect(function()
+		render(not on)
+		if onChange then task.spawn(onChange, on) end
+	end)
+	return card
+end
+
+local function makeSlider(parent, label, id, min, max, def, onChange)
+	local card = makeCard(parent, 58)
+	make("TextLabel", {
+		Position = UDim2.fromOffset(10, 4),
+		Size = UDim2.new(1, -70, 0, 20),
+		BackgroundTransparency = 1,
+		Text = label, Font = FONT, TextSize = 14, TextColor3 = col(AD.txt),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, card)
+	local valLbl = make("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -10, 0, 4),
+		Size = UDim2.fromOffset(56, 20),
+		BackgroundTransparency = 1,
+		Text = tostring(def), Font = FONT, TextSize = 13,
+		TextColor3 = col(AD.accent),
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, card)
+	local barBg = make("Frame", {
+		Position = UDim2.fromOffset(10, 32),
+		Size = UDim2.new(1, -20, 0, 10),
+		BackgroundColor3 = col(AD.dark),
+		BorderSizePixel = 0,
+	}, card)
+	make("UICorner", { CornerRadius = UDim.new(0, 4) }, barBg)
+	local fill = make("Frame", {
+		Size = UDim2.fromScale((def - min) / (max - min), 1),
+		BackgroundColor3 = col(AD.accent),
+		BorderSizePixel = 0,
+	}, barBg)
+	make("UICorner", { CornerRadius = UDim.new(0, 4) }, fill)
+	local hit = make("TextButton", {
+		Position = UDim2.fromOffset(0, 20),
+		Size = UDim2.new(1, 0, 0, 38),
+		BackgroundTransparency = 1, Text = "",
+	}, card)
+	local dragging = false
+	local function update(x)
+		local pct = math.clamp((x - barBg.AbsolutePosition.X) / barBg.AbsoluteSize.X, 0, 1)
+		local val = math.floor(min + (max - min) * pct + 0.5)
+		fill.Size = UDim2.fromScale(pct, 1)
+		valLbl.Text = tostring(val)
+		States[id] = val
+		if onChange then onChange(val) end
+	end
+	hit.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; update(input.Position.X)
+		end
+	end)
+	conns[#conns + 1] = UIS.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			update(input.Position.X)
+		end
+	end)
+	conns[#conns + 1] = UIS.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	return card
+end
+
+local function makeRunButton(parent, label, sub, onClick, color)
+	local card = makeCard(parent, sub and 48 or 40)
+	make("TextLabel", {
+		Position = UDim2.fromOffset(10, sub and 4 or 0),
+		Size = UDim2.new(1, -70, 0, sub and 20 or 40),
+		BackgroundTransparency = 1,
+		Text = label, Font = FONT, TextSize = 14, TextColor3 = col(AD.txt),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = sub and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+	}, card)
+	if sub then
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 24),
+			Size = UDim2.new(1, -70, 0, 16),
+			BackgroundTransparency = 1,
+			Text = sub, Font = FONT, TextSize = 10, TextColor3 = col(AD.txtDim),
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, card)
+	end
+	local go = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromOffset(48, 26),
+		BackgroundColor3 = col(color or AD.accent),
+		BorderSizePixel = 0, AutoButtonColor = false,
+		Text = "RUN", Font = FONT, TextSize = 12, TextColor3 = Color3.new(1, 1, 1),
+	}, card)
+	make("UICorner", { CornerRadius = UDim.new(0, 4) }, go)
+	bevel(go, 2, 2, "#ffffff", "#000000", 0.4, 0.35)
+	go.MouseEnter:Connect(function()
+		TweenService:Create(go, tFade, { BackgroundColor3 = col(color or AD.accent):Lerp(Color3.new(1, 1, 1), 0.2) }):Play()
+	end)
+	go.MouseLeave:Connect(function()
+		TweenService:Create(go, tFade, { BackgroundColor3 = col(color or AD.accent) }):Play()
+	end)
+	local btn = make("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "" }, card)
+	btn.Activated:Connect(function()
+		if onClick then task.spawn(onClick) end
+	end)
+	return card
+end
+
+-- LOGIC
+
+-- 1. FLY
+local function applyFly()
+	cleanup("fly")
+	if not States.fly then return end
+	local char = LP.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	local bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+	bv.Velocity = Vector3.zero
+	bv.Parent = hrp
+	local bg = Instance.new("BodyGyro")
+	bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+	bg.P = 3000
+	bg.Parent = hrp
+	ActiveConns.fly = RunService.RenderStepped:Connect(function()
+		local cam = workspace.CurrentCamera
+		local c = LP.Character
+		local h = c and c:FindFirstChild("HumanoidRootPart")
+		if not h or not bv.Parent then return end
+		local move = Vector3.zero
+		if UIS:IsKeyDown(Enum.KeyCode.W) then move += cam.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.S) then move -= cam.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.A) then move -= cam.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.D) then move += cam.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.new(0, 1, 0) end
+		if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0, 1, 0) end
+		if move.Magnitude > 0 then move = move.Unit * States.flySpeed end
+		bv.Velocity = move
+		bg.CFrame = cam.CFrame
+	end)
+end
+
+-- 2. WALKSPEED
+local function applyWalkSpeed()
+	local char = LP.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then hum.WalkSpeed = States.walkSpeed end
+end
+
+-- 3. INFINITE JUMP
+local function applyInfJump()
+	cleanup("infJump")
+	if not States.infiniteJump then return end
+	ActiveConns.infJump = UIS.JumpRequest:Connect(function()
+		local char = LP.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+	end)
+end
+
+-- 4. NOCLIP
+local function applyNoclip()
+	cleanup("noclip")
+	if not States.noclip then return end
+	ActiveConns.noclip = RunService.Stepped:Connect(function()
+		local char = LP.Character
+		if not char then return end
+		for _, p in char:GetDescendants() do
+			if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
+		end
+	end)
+end
+
+-- 5. WAYPOINT
+local function applyWaypoint()
+	cleanup("waypoint")
+	if not States.waypoint then return end
+	ActiveConns.waypoint = UIS.InputBegan:Connect(function(input, processed)
+		if processed or input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+		local mouse = LP:GetMouse()
+		local target = mouse.Target
+		if not target then return end
+		local char = LP.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp then hrp.CFrame = CFrame.new(target.Position + Vector3.new(0, 3, 0)) end
+	end)
+end
+
+-- 6. INVISIBLE
+local function applyInvisible()
+	cleanup("invisible")
+	local char = LP.Character
+	if not char then return end
+	for _, d in char:GetDescendants() do
+		if d:IsA("BasePart") or d:IsA("Decal") then
+			d.LocalTransparencyModifier = States.invisible and 1 or 0
+		end
+	end
+	if States.invisible then
+		ActiveConns.invisible = RunService.RenderStepped:Connect(function()
+			local c = LP.Character
+			if not c then return end
+			for _, d in c:GetDescendants() do
+				if d:IsA("BasePart") or d:IsA("Decal") then
+					d.LocalTransparencyModifier = 1
+				end
+			end
+		end)
+	end
+end
+
+-- 7. GODMODE
+local function applyGodmode()
+	cleanup("godmode")
+	local char = LP.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	if States.godmode then
+		hum.MaxHealth = math.huge
+		hum.Health = math.huge
+		ActiveConns.godmode = hum.HealthChanged:Connect(function(h)
+			if h < hum.MaxHealth then hum.Health = hum.MaxHealth end
+		end)
+	else
+		hum.MaxHealth = 100
+		hum.Health = 100
+	end
+end
+
+-- 8. ESP PLAYERS
+local espPlayerGuis = {}
+local function applyESPPlayers()
+	cleanup("espPlayers")
+	for _, g in espPlayerGuis do if g and g.Parent then g:Destroy() end end
+	espPlayerGuis = {}
+	if not States.espPlayers then return end
+	local function addEsp(plr)
+		if plr == LP then return end
+		local function build()
+			local char = plr.Character
+			local head = char and char:FindFirstChild("Head")
+			if not head then return end
+			local bb = Instance.new("BillboardGui")
+			bb.Size = UDim2.fromOffset(200, 40)
+			bb.StudsOffset = Vector3.new(0, 3, 0)
+			bb.AlwaysOnTop = true
+			local lbl = Instance.new("TextLabel")
+			lbl.Size = UDim2.fromScale(1, 1)
+			lbl.BackgroundTransparency = 1
+			lbl.TextColor3 = col(C.yellow)
+			lbl.TextStrokeTransparency = 0
+			lbl.Font = FONT
+			lbl.TextSize = 14
+			lbl.Parent = bb
+			bb.Parent = head
+			table.insert(espPlayerGuis, bb)
+			RunService.RenderStepped:Connect(function()
+				if not bb.Parent then return end
+				local c2 = plr.Character
+				local hrp = c2 and c2:FindFirstChild("HumanoidRootPart")
+				if hrp then
+					local dist = (hrp.Position - workspace.CurrentCamera.CFrame.Position).Magnitude
+					lbl.Text = plr.Name .. " [" .. math.floor(dist) .. "m]"
+				end
+			end)
+		end
+		build()
+		plr.CharacterAdded:Connect(build)
+	end
+	for _, p in Players:GetPlayers() do addEsp(p) end
+	ActiveConns.espPlayers = Players.PlayerAdded:Connect(addEsp)
+end
+
+-- 9. XRAY
+local function applyXray()
+	cleanup("xray")
+	if not States.xray then return end
+	ActiveConns.xray = RunService.RenderStepped:Connect(function()
+		for _, obj in workspace:GetDescendants() do
+			if obj:IsA("BasePart") then
+				obj.LocalTransparencyModifier = 0.5
+			end
+		end
+	end)
+end
+
+-- 10. ESP BOTS
+local function applyESPBots()
+	cleanup("espBots")
+	if not States.espBots then return end
+	ActiveConns.espBots = RunService.RenderStepped:Connect(function()
+		for _, model in workspace:GetChildren() do
+			if model:IsA("Model") and model:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(model) then
+				local head = model:FindFirstChild("Head")
+				if head and not head:FindFirstChild("TokenBotESP") then
+					local bb = Instance.new("BillboardGui")
+					bb.Name = "TokenBotESP"
+					bb.Size = UDim2.fromOffset(150, 30)
+					bb.StudsOffset = Vector3.new(0, 2, 0)
+					bb.AlwaysOnTop = true
+					local lbl = Instance.new("TextLabel")
+					lbl.Size = UDim2.fromScale(1, 1)
+					lbl.BackgroundTransparency = 1
+					lbl.TextColor3 = col(C.yellow)
+					lbl.TextStrokeTransparency = 0
+					lbl.Font = FONT
+					lbl.TextSize = 12
+					lbl.Text = model.Name
+					lbl.Parent = bb
+					bb.Parent = head
+				end
+			end
+		end
+	end)
+end
+
+-- 11. HITBOX
+local function applyHitbox()
+	cleanup("hitbox")
+	if States.hitboxSize <= 1 then return end
+	local size = States.hitboxSize
+	ActiveConns.hitbox = RunService.Stepped:Connect(function()
+		for _, plr in Players:GetPlayers() do
+			if plr ~= LP then
+				local char = plr.Character
+				if char then
+					for _, p in char:GetDescendants() do
+						if p:IsA("BasePart") then
+							p.Size = Vector3.new(size, size, size)
+						end
+					end
+				end
+			end
+		end
+	end)
+end
+
+-- 12/13/14. LOCK + VACUUM
+local function applyLockVacuum()
+	cleanup("lockVacuum")
+	if not (States.lockPlayers or States.lockBots or States.vacuumPower > 1) then return end
+	ActiveConns.lockVacuum = RunService.RenderStepped:Connect(function()
+		local char = LP.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
+		local targets = {}
+		if States.lockPlayers then
+			for _, p in Players:GetPlayers() do
+				if p ~= LP and p.Character then
+					local h = p.Character:FindFirstChild("HumanoidRootPart")
+					if h then table.insert(targets, h) end
+				end
+			end
+		end
+		if States.lockBots then
+			for _, m in workspace:GetChildren() do
+				if m:IsA("Model") and m:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(m) then
+					local h = m:FindFirstChild("HumanoidRootPart")
+					if h then table.insert(targets, h) end
+				end
+			end
+		end
+		for _, h in targets do
+			if States.lockPlayers or States.lockBots then
+				hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(h.Position.X, hrp.Position.Y, h.Position.Z))
+			end
+			if States.vacuumPower > 1 then
+				local dir = (hrp.Position - h.Position)
+				if dir.Magnitude > 3 and dir.Magnitude < 200 then
+					local pull = dir.Unit * (States.vacuumPower * 8)
+					h.AssemblyLinearVelocity = h.AssemblyLinearVelocity + pull
+				end
+			end
+		end
+	end)
+end
+
+-- 15. LOW GRAPHICS
+local function applyLowGraphics()
+	cleanup("lowGraphics")
+	if not States.lowGraphics then return end
+	local g = Lighting:FindFirstChild("TokenLowGFX") or make("BlurEffect", { Name = "TokenLowGFX", Size = 4 }, Lighting)
+	Lighting.GlobalShadows = false
+	Lighting.FogEnd = 300
+	Lighting.FogStart = 100
+	ActiveConns.lowGraphics = RunService.Stepped:Connect(function()
+		for _, l in Lighting:GetChildren() do
+			if l:IsA("Light") then l.Enabled = false end
+		end
+	end)
+end
+
+-- 16. CLAY GRAPHICS
+local function applyClayGraphics()
+	cleanup("clayGraphics")
+	if not States.clayGraphics then return end
+	Lighting.GlobalShadows = false
+	Lighting.FogEnd = 80
+	Lighting.FogStart = 30
+	for _, l in Lighting:GetDescendants() do
+		if l:IsA("Light") then l.Enabled = false end
+	end
+	ActiveConns.clayGraphics = RunService.Stepped:Connect(function()
+		Lighting.EnvironmentDiffuseScale = 0
+		Lighting.EnvironmentSpecularScale = 0
+	end)
+end
+
+-- 17. BRIGHTNESS
+local function applyBrightness()
+	cleanup("brightness")
+	if States.brightness <= 0 then
+		Lighting.Brightness = 2
+		return
+	end
+	ActiveConns.brightness = RunService.Stepped:Connect(function()
+		Lighting.Brightness = States.brightness * 2
+		for _, l in Lighting:GetDescendants() do
+			if l:IsA("Light") then
+				l.Enabled = true
+				l.Brightness = States.brightness * 3
+			end
+		end
+	end)
+end
+
+-- CATEGORY CONFIG
+local Categories = {
+	{
+		name = "Movement", icon = "🏃",
+		items = {
+			{type = "toggle", label = "บิน", sub = "WASD + Space/LCtrl", id = "fly", onChange = applyFly},
+			{type = "slider", label = "ความเร็วบิน", id = "flySpeed", min = 1, max = 999, def = 50},
+			{type = "slider", label = "ความเร็ววิ่ง", id = "walkSpeed", min = 1, max = 999, def = 16, onChange = applyWalkSpeed},
+			{type = "toggle", label = "กระโดดไม่จำกัด", id = "infiniteJump", onChange = applyInfJump},
+			{type = "toggle", label = "เดินทะลุ", id = "noclip", onChange = applyNoclip},
+			{type = "toggle", label = "วาปไปจุดที่กด", sub = "คลิกซ้ายบนพื้น", id = "waypoint", onChange = applyWaypoint},
+		},
+	},
+	{
+		name = "Player", icon = "👤",
+		items = {
+			{type = "toggle", label = "หายตัว", sub = "คนอื่นไม่เห็น", id = "invisible", onChange = applyInvisible},
+			{type = "toggle", label = "อมตะ / INF HP", id = "godmode", onChange = applyGodmode},
+			{type = "toggle", label = "มองผู้เล่น", sub = "แสดงชื่อ + ระยะ", id = "espPlayers", onChange = applyESPPlayers},
+			{type = "toggle", label = "ล็อกผู้เล่นอัตโนมัติ", id = "lockPlayers", onChange = applyLockVacuum},
+			{type = "slider", label = "แรงดูด (ผู้เล่น+บอท)", id = "vacuumPower", min = 1, max = 10, def = 1, onChange = applyLockVacuum},
+		},
+	},
+	{
+		name = "Combat", icon = "⚔️",
+		items = {
+			{type = "toggle", label = "X-Ray", sub = "เห็นทะลุกำแพง", id = "xray", onChange = applyXray},
+			{type = "toggle", label = "มองบอท", sub = "แสดงชื่อบอท", id = "espBots", onChange = applyESPxBots or applyESPBots},
+			{type = "slider", label = "ขยาย Hitbox", id = "hitboxSize", min = 0.5, max = 100, def = 1, onChange = applyHitbox},
+			{type = "toggle", label = "ล็อกบอทอัตโนมัติ", id = "lockBots", onChange = applyLockVacuum},
+		},
+	},
+	{
+		name = "Visual", icon = "🎨",
+		items = {
+			{type = "toggle", label = "ลดกราฟิก", id = "lowGraphics", onChange = applyLowGraphics},
+			{type = "toggle", label = "ภาพดินน้ำมัน", sub = "ลดสุดๆ", id = "clayGraphics", onChange = applyClayGraphics},
+			{type = "slider", label = "แมพสว่าง", id = "brightness", min = 0, max = 10, def = 0, onChange = applyBrightness},
+		},
+	},
+	{
+		name = "Server", icon = "🌐",
+		items = {
+			{type = "button", label = "ย้ายเชิฟคนน้อย", sub = "หาเซิร์ฟที่คนน้อยที่สุด", onClick = function()
+				local success, servers = pcall(function() return TeleportService:GetPublicServersAsync(game.PlaceId) end)
+				if not success or not servers or #servers == 0 then
+					warn("ไม่พบเซิร์ฟ")
+					return
+				end
+				table.sort(servers, function(a, b) return a.Playing < b.Playing end)
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[1].Id, LP)
+			end},
+			{type = "button", label = "รีเชิฟ / ย้ายเชิฟเดิม", sub = "กลับเข้าเซิร์ฟเดิม", onClick = function()
+				TeleportService:Teleport(game.PlaceId, LP)
+			end},
+		},
+	},
+	{
+		name = "Audio", icon = "🎵",
+		items = {
+			{type = "button", label = "เปิดเพลง", sub = "ใช้ได้บางแมพ", color = AD.green, onClick = function()
+				pcall(function()
+					loadstring(game:HttpGet("https://encrypt-x.pages.dev/Scripts?Id=1465108175034"))("1465108175034")
+				end)
+			end},
+			{type = "button", label = "ดูดเพลง", sub = "ใช้ได้บางแมพ", color = AD.green, onClick = function()
+				pcall(function()
+					loadstring(game:HttpGet("https://encrypt-x.pages.dev/Scripts?Id=8011267776024"))("8011267776024")
+				end)
+			end},
+		},
+	},
+}
+
+-- สร้าง Layout ใน content
+for _, ch in content:GetChildren() do
+	if ch:IsA("Frame") or ch:IsA("ScrollingFrame") then ch:Destroy() end
+end
+for _, ch in content:GetChildren() do
+	if ch:IsA("UIPadding") then ch:Destroy() end
+end
+
+local sidebar = make("Frame", {
+	Name = "Sidebar",
+	Position = UDim2.fromOffset(6, 6),
+	Size = UDim2.new(0, 130, 1, -12),
+	BackgroundColor3 = col(AD.side),
+	BorderSizePixel = 0,
+	ZIndex = 2,
+}, content)
+make("UICorner", { CornerRadius = UDim.new(0, 6) }, sidebar)
+make("UIStroke", {
+	Color = col(AD.border), Thickness = 2,
+	ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+}, sidebar)
+
+make("UIListLayout", {
+	Padding = UDim.new(0, 4),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, sidebar)
+make("UIPadding", {
+	PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
+	PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+}, sidebar)
+
+local itemScroll = make("ScrollingFrame", {
+	Name = "Items",
+	Position = UDim2.fromOffset(142, 6),
+	Size = UDim2.new(1, -148, 1, -12),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 4,
+	ScrollBarImageColor3 = col(AD.accent),
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, content)
+make("UIListLayout", {
+	Padding = UDim.new(0, 6),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, itemScroll)
+
+local sidebarButtons = {}
+local function showCategory(idx)
+	for i, b in sidebarButtons do
+		local on = (i == idx)
+		TweenService:Create(b, tFade, {
+			BackgroundColor3 = on and col(AD.accent) or col(AD.sideBtn)
+		}):Play()
+		b.TextColor3 = on and Color3.new(1, 1, 1) or col(AD.txtDim)
+	end
+	for _, ch in itemScroll:GetChildren() do
+		if ch:IsA("Frame") then ch:Destroy() end
+	end
+	local cat = Categories[idx]
+	for _, item in cat.items do
+		if item.type == "toggle" then
+			makeToggle(itemScroll, item.label, item.sub, item.id, item.onChange)
+		elseif item.type == "slider" then
+			makeSlider(itemScroll, item.label, item.id, item.min, item.max, item.def, item.onChange)
+		elseif item.type == "button" then
+			makeRunButton(itemScroll, item.label, item.sub, item.onClick, item.color)
+		end
+	end
+	itemScroll.CanvasPosition = Vector2.zero
+end
+
+for i, cat in Categories do
+	local b = make("TextButton", {
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundColor3 = col(AD.sideBtn),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = " " .. cat.icon .. " " .. cat.name,
+		Font = FONT, TextSize = 12, TextColor3 = col(AD.txtDim),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = i,
+	}, sidebar)
+	make("UICorner", { CornerRadius = UDim.new(0, 4) }, b)
+	make("UIStroke", {
+		Color = col(AD.border), Thickness = 1,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, b)
+	sidebarButtons[i] = b
+	b.Activated:Connect(function() showCategory(i) end)
+end
+
+showCategory(1)
+
+gui.Destroying:Connect(function()
+	for _, c in ActiveConns do
+		pcall(function() c:Disconnect() end)
+	end
+	table.clear(ActiveConns)
+end)
+
+-- ขอบนูนรอบหน้าต่างทั้งอัน
+bevel(wc, 2, 3, "#ffffff", "#000000", 0.6, 0.45)
+
+-- ===== แคปซูลตอนย่อ =====
+local pc = pill.canvas
+
+makeCoin(pc, pill.holder, UDim2.fromOffset(22, 20), 2)
+
+local function pillText(name, color, off, z)
+	return make("TextLabel", {
+		Name = name,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 44 + off, 0.5, off),
+		Size = UDim2.fromOffset(74, 24),
+		BackgroundTransparency = 1,
+		Text = "Token",
+		Font = FONT,
+		TextSize = 20,
+		TextColor3 = color,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = z,
+	}, pc)
+end
+pillText("Shadow", col(C.yellow2), 2, 3)
+pillText("Text", col(C.yellow), 0, 4)
+
+local dragPill = make("TextButton", {
+	Name = "Drag",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 10,
+}, pc)
+
+-- ===== กลางวัน/กลางคืน =====
+local SKY = {
+	dayTop = col(C.sky1), dayBot = col(C.sky2),
+	duskTop = col("#e8875a"), duskBot = col("#f7c98b"),
+	nightTop = col("#0b1530"), nightBot = col("#22386b"),
+}
+local CLOUD_NIGHT = col("#4b5a86")
+local GRASS_NIGHT = Color3.new(0.08, 0.14, 0.2)
+
+local function smooth(x)
+	x = math.clamp(x, 0, 1)
+	return x * x * (3 - 2 * x)
+end
+
+local function nightAmount(t)
+	if t >= CYCLE - TWILIGHT then
+		return 1 - smooth((t - (CYCLE - TWILIGHT)) / (TWILIGHT * 2))
+	elseif t < TWILIGHT then
+		return 1 - smooth((t + TWILIGHT) / (TWILIGHT * 2))
+	elseif t < DAY_SEC - TWILIGHT then
+		return 0
+	elseif t < DAY_SEC + TWILIGHT then
+		return smooth((t - (DAY_SEC - TWILIGHT)) / (TWILIGHT * 2))
+	end
+	return 1
+end
+
+local function skyColors(n)
+	if n < 0.5 then
+		local k = n * 2
+		return SKY.dayTop:Lerp(SKY.duskTop, k), SKY.dayBot:Lerp(SKY.duskBot, k)
+	end
+	local k = (n - 0.5) * 2
+	return SKY.duskTop:Lerp(SKY.nightTop, k), SKY.duskBot:Lerp(SKY.nightBot, k)
+end
+
+local ang = 0
+local spinBoost = Instance.new("NumberValue")
+spinBoost.Value = 1
+local lastN = -1
+local t0 = os.clock()
+
+local spinConn = RunService.RenderStepped:Connect(function(dt)
+	local rot = (os.clock() * 140) % 360
+	for _, g in rainbows do
+		g.Rotation = rot
+	end
+	ang = (ang + dt * math.pi * 2 / 2.6 * spinBoost.Value) % (math.pi * 2)
+	local c = math.cos(ang)
+	local w = math.max(2, math.abs(c) * COIN)
+	for _, coin in coins do
+		if coin.owner.Visible then
+			coin.spin.Size = UDim2.fromOffset(w, COIN)
+			coin.front.Visible = c >= 0
+			coin.back.Visible = c < 0
+		end
+	end
+	if not win.holder.Visible then
+		return
+	end
+	local clock = os.clock() - t0
+	local t = clock % CYCLE
+	local n = nightAmount(t)
+	if math.abs(n - lastN) > 0.003 then
+		lastN = n
+		local top, bot = skyColors(n)
+		sky.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, top),
+			ColorSequenceKeypoint.new(0.7, bot),
+			ColorSequenceKeypoint.new(1, bot),
+		})
+		for _, cl in clouds do
+			tint(cl.pieces, CLOUD_NIGHT, n * 0.85)
+		end
+		tint(grassPieces, GRASS_NIGHT, n * 0.6)
+	end
+	if t < DAY_SEC then
+		local p = t / DAY_SEC
+		sun.Visible = true
+		moon.Visible = false
+		sun.Position = UDim2.fromOffset(
+			math.floor(-SUN_W + (W + SUN_W) * p + 0.5),
+			math.floor(46 - 42 * math.sin(math.pi * p) + 0.5)
+		)
+	else
+		local p = (t - DAY_SEC) / NIGHT_SEC
+		sun.Visible = false
+		moon.Visible = true
+		moon.Position = UDim2.fromOffset(
+			math.floor(-MOON_W + (W + MOON_W) * p + 0.5),
+			math.floor(46 - 38 * math.sin(math.pi * p) + 0.5)
+		)
+	end
+	for _, cl in clouds do
+		local x = (cl.x0 - cl.speed * clock) % (W + cl.w) - cl.w
+		cl.frame.Position = UDim2.fromOffset(math.floor(x + 0.5), cl.y)
+	end
+	for i, s in stars do
+		if n > 0.01 then
+			local tw = 0.5 + 0.5 * math.sin(clock * 2.2 + i * 1.7)
+			s.BackgroundTransparency = 1 - n * (0.4 + 0.6 * tw)
+		elseif s.BackgroundTransparency < 1 then
+			s.BackgroundTransparency = 1
+		end
+	end
+end)
+gui.Destroying:Connect(function()
+	spinConn:Disconnect()
+end)
+
+local camera = workspace.CurrentCamera
+while not camera do
+	task.wait()
+	camera = workspace.CurrentCamera
+end
+local waited = 0
+while camera.ViewportSize.X < 100 and waited < 3 do
+	waited += task.wait()
+end
+
+local state = "closed"
+
+local function curSize()
+	return state == "mini" and PILL_SIZE or WIN_SIZE
+end
+
+local function setPos(v, size)
+	local view = camera.ViewportSize
+	uiPos = Vector2.new(
+		math.clamp(v.X, 0, math.max(0, view.X - size.X)),
+		math.clamp(v.Y, 0, math.max(0, view.Y - size.Y))
+	)
+	if onUiMoved then
+		onUiMoved()
+	end
+	for _, p in { win, pill } do
+		if p.holder.Visible then
+			p:place()
+		end
+	end
+end
+
+local function openWin()
+	if state ~= "closed" then
+		return
+	end
+	state = "open"
+	setPos(uiPos, WIN_SIZE)
+	win:show()
+end
+
+local function closeAll()
+	if state == "open" then
+		win:hide()
+	elseif state == "mini" then
+		pill:hide()
+	end
+	state = "closed"
+end
+
+local function minimize()
+	if state ~= "open" then
+		return
+	end
+	state = "mini"
+	win:hide(pill:center())
+	pill:show()
+end
+
+local function expand()
+	if state ~= "mini" then
+		return
+	end
+	state = "open"
+	setPos(uiPos, WIN_SIZE)
+	pill:hide()
+	win:show(pill:center())
+end
+
+local function draggable(handle, getSize, onClick)
+	local dragging = false
+	local moved = false
+	local tracked = nil
+	local startPoint = Vector3.zero
+	local startPos = Vector2.zero
+	handle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			moved = false
+			tracked = input
+			startPoint = input.Position
+			startPos = uiPos
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End and dragging and tracked == input then
+					dragging = false
+					tracked = nil
+					if not moved and onClick then
+						onClick()
+					end
+				end
+			end)
+		end
+	end)
+	conns[#conns + 1] = UIS.InputChanged:Connect(function(input)
+		if not dragging then
+			return
+		end
+		local mouse = input.UserInputType == Enum.UserInputType.MouseMovement
+		local touch = input.UserInputType == Enum.UserInputType.Touch and input == tracked
+		if mouse or touch then
+			local d = input.Position - startPoint
+			if d.Magnitude > 4 then
+				moved = true
+			end
+			if moved then
+				setPos(startPos + Vector2.new(d.X, d.Y), getSize())
+			end
+		end
+	end)
+end
+
+draggable(dragHeader, curSize, nil)
+draggable(dragPill, curSize, expand)
+
+minBtn.Activated:Connect(function()
+	if not blocked() then
+		minimize()
+	end
+end)
+
+-- ===== กล่องถามตอนกด X =====
+local GLASS_W, GLASS_H = 270, 132
+local GLASS_BLUR = 14
+local WHITE = Color3.new(1, 1, 1)
+local tJelly = TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+local function seq(keys)
+	local list = {}
+	for _, k in keys do
+		table.insert(list, NumberSequenceKeypoint.new(k[1], k[2]))
+	end
+	return NumberSequence.new(list)
+end
+
+local confirmDim = make("TextButton", {
+	Name = "ConfirmDim",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.new(0, 0, 0),
+	BackgroundTransparency = 1,
+	AutoButtonColor = false,
+	Text = "",
+	Visible = false,
+	ZIndex = 110,
+}, wc)
+
+local glass = make("CanvasGroup", {
+	Name = "GlassConfirm",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Size = UDim2.fromOffset(GLASS_W, GLASS_H),
+	BackgroundTransparency = 1,
+	GroupTransparency = 1,
+	Active = true,
+	Visible = false,
+	ZIndex = 50,
+}, gui)
+make("UICorner", { CornerRadius = UDim.new(0, 26) }, glass)
+local glassScale = make("UIScale", { Scale = 0.6 }, glass)
+
+local fill = make("Frame", {
+	Name = "Fill",
+	Position = UDim2.fromOffset(2, 2),
+	Size = UDim2.new(1, -4, 1, -4),
+	BackgroundColor3 = Color3.fromRGB(150, 178, 225),
+	BorderSizePixel = 0,
+}, glass)
+make("UICorner", { CornerRadius = UDim.new(0, 24) }, fill)
+make("UIGradient", {
+	Rotation = 35,
+	Transparency = seq({ { 0, 0.38 }, { 0.5, 0.58 }, { 1, 0.45 } }),
+}, fill)
+
+local rim = make("UIStroke", {
+	Color = WHITE,
+	Thickness = 1.5,
+	ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+}, fill)
+make("UIGradient", {
+	Rotation = 45,
+	Transparency = seq({ { 0, 0.05 }, { 0.3, 0.75 }, { 0.7, 0.75 }, { 1, 0.1 } }),
+}, rim)
+
+local gloss = make("Frame", {
+	Name = "Gloss",
+	Position = UDim2.fromOffset(10, 6),
+	Size = UDim2.new(1, -20, 0, 40),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+}, glass)
+make("UICorner", { CornerRadius = UDim.new(0, 20) }, gloss)
+make("UIGradient", {
+	Rotation = 90,
+	Transparency = seq({ { 0, 0.62 }, { 1, 1 } }),
+}, gloss)
+
+local shine = make("Frame", {
+	Name = "Shine",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.new(0, -40, 0.5, 0),
+	Size = UDim2.fromOffset(46, GLASS_H * 2),
+	Rotation = 20,
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+}, glass)
+make("UIGradient", {
+	Transparency = seq({ { 0, 1 }, { 0.5, 0.74 }, { 1, 1 } }),
+}, shine)
+local shineTween = TweenService:Create(
+	shine,
+	TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, false, 1.4),
+	{ Position = UDim2.new(0, GLASS_W + 40, 0.5, 0) }
+)
+
+local gTitle = make("TextLabel", {
+	Name = "Title",
+	Position = UDim2.fromOffset(16, 14),
+	Size = UDim2.new(1, -32, 0, 24),
+	BackgroundTransparency = 1,
+	Text = "ลบ Token Hub ออกไหม?",
+	TextColor3 = WHITE,
+	Font = Enum.Font.GothamBold,
+	TextSize = 17,
+}, glass)
+make("UIStroke", {
+	Color = Color3.new(0, 0, 0),
+	Thickness = 1,
+	Transparency = 0.6,
+	ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+}, gTitle)
+
+local gSub = make("TextLabel", {
+	Name = "Sub",
+	Position = UDim2.fromOffset(16, 40),
+	Size = UDim2.new(1, -32, 0, 32),
+	BackgroundTransparency = 1,
+	Text = "UI นี้จะถูกลบทิ้งทั้งหมด\nกดยกเลิกเพื่อกลับไปใช้ต่อ",
+	TextColor3 = Color3.fromRGB(228, 236, 250),
+	Font = Enum.Font.GothamMedium,
+	TextSize = 12,
+	TextWrapped = true,
+}, glass)
+make("UIStroke", {
+	Color = Color3.new(0, 0, 0),
+	Thickness = 1,
+	Transparency = 0.7,
+	ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+}, gSub)
+
+local function glassBtn(name, text, x, tint, tintTrans)
+	local b = make("TextButton", {
+		Name = name,
+		Position = UDim2.fromOffset(x, 84),
+		Size = UDim2.fromOffset(112, 36),
+		BackgroundColor3 = tint,
+		BackgroundTransparency = tintTrans,
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = text,
+		TextColor3 = WHITE,
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+	}, glass)
+	make("UICorner", { CornerRadius = UDim.new(1, 0) }, b)
+	make("UIStroke", {
+		Color = WHITE,
+		Thickness = 1.2,
+		Transparency = 0.35,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, b)
+	local s = make("UIScale", { Scale = 1 }, b)
+	local hoverTrans = math.max(tintTrans - 0.15, 0.1)
+	b.MouseEnter:Connect(function()
+		TweenService:Create(s, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.07 }):Play()
+		TweenService:Create(b, tFade, { BackgroundTransparency = hoverTrans }):Play()
+	end)
+	b.MouseLeave:Connect(function()
+		TweenService:Create(s, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Scale = 1 }):Play()
+		TweenService:Create(b, tFade, { BackgroundTransparency = tintTrans }):Play()
+	end)
+	b.MouseButton1Down:Connect(function()
+		TweenService:Create(s, TweenInfo.new(0.1, Enum.EasingStyle.Quad), { Scale = 0.92 }):Play()
+	end)
+	b.MouseButton1Up:Connect(function()
+		TweenService:Create(s, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end)
+	return b
+end
+
+local cancelBtn = glassBtn("Cancel", "ยกเลิก", 17, WHITE, 0.78)
+local removeBtn = glassBtn("Remove", "ลบออก", 141, Color3.fromRGB(255, 69, 69), 0.45)
+
+local blur = nil
+local function blurTo(size)
+	if GLASS_BLUR <= 0 then return end
+	if not blur then
+		if size == 0 then return end
+		blur = make("BlurEffect", { Name = "TokenHubBlur", Size = 0 }, Lighting)
+	end
+	local b = blur
+	local tw = TweenService:Create(b, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = size })
+	if size == 0 then
+		tw.Completed:Connect(function(playState)
+			if playState == Enum.PlaybackState.Completed and blur == b then
+				b:Destroy()
+				blur = nil
+			end
+		end)
+	end
+	tw:Play()
+end
+
+gui.Destroying:Connect(function()
+	if blur then
+		blur:Destroy()
+		blur = nil
+	end
+end)
+
+local confirmToken = 0
+
+local function glassPos(dy)
+	local c = win:center()
+	return UDim2.fromOffset(c.X, c.Y + (dy or 0))
+end
+
+onUiMoved = function()
+	if confirmOpen then
+		glass.Position = glassPos()
+	end
+end
+
+local function openConfirm()
+	if blocked() or state ~= "open" then return end
+	confirmOpen = true
+	confirmToken += 1
+	glass.Position = glassPos(16)
+	glass.GroupTransparency = 1
+	glassScale.Scale = 0.6
+	glass.Visible = true
+	confirmDim.BackgroundTransparency = 1
+	confirmDim.Visible = true
+	TweenService:Create(confirmDim, tFade, { BackgroundTransparency = 0.42 }):Play()
+	TweenService:Create(glassScale, tJelly, { Scale = 1 }):Play()
+	TweenService:Create(glass, tMove, { Position = glassPos(), GroupTransparency = 0 }):Play()
+	shine.Position = UDim2.new(0, -40, 0.5, 0)
+	shineTween:Play()
+	blurTo(GLASS_BLUR)
+end
+
+local function closeConfirm()
+	if not confirmOpen then return end
+	confirmOpen = false
+	confirmToken += 1
+	local mine = confirmToken
+	shineTween:Cancel()
+	TweenService:Create(glassScale, tOut, { Scale = 0.85 }):Play()
+	local f = TweenService:Create(glass, tOut, { GroupTransparency = 1 })
+	f.Completed:Connect(function()
+		if confirmToken == mine then glass.Visible = false end
+	end)
+	f:Play()
+	local d = TweenService:Create(confirmDim, tOut, { BackgroundTransparency = 1 })
+	d.Completed:Connect(function()
+		if confirmToken == mine then confirmDim.Visible = false end
+	end)
+	d:Play()
+	blurTo(0)
+end
+
+local function removeAll()
+	if not confirmOpen then return end
+	confirmOpen = false
+	removing = true
+	confirmToken += 1
+	shineTween:Cancel()
+	TweenService:Create(glassScale, tOut, { Scale = 0.85 }):Play()
+	TweenService:Create(glass, tOut, { GroupTransparency = 1 }):Play()
+	TweenService:Create(confirmDim, tOut, { BackgroundTransparency = 1 }):Play()
+	blurTo(0)
+	task.wait(0.18)
+	win:hide(win:center())
+	task.wait(0.4)
+	gui:Destroy()
+end
+
+cancelBtn.Activated:Connect(closeConfirm)
+removeBtn.Activated:Connect(function()
+	task.spawn(removeAll)
+end)
+confirmDim.Activated:Connect(closeConfirm)
+closeBtn.Activated:Connect(openConfirm)
+
+conns[#conns + 1] = UIS.InputBegan:Connect(function(input, processed)
+	if processed or input.KeyCode ~= KEY or blocked() then return end
+	if state == "closed" then
+		openWin()
+	else
+		closeAll()
+	end
+end)
+
+conns[#conns + 1] = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+	setPos(uiPos, curSize())
+end)
+
+-- ===== INTRO =====
+local INTRO_TOTAL = 3.0
+local EASE_Q = Enum.EasingStyle.Quint
+local EASE_B = Enum.EasingStyle.Back
+local EASE_QUAD = Enum.EasingStyle.Quad
+local DIR_OUT = Enum.EasingDirection.Out
+
+local function ti(t, style)
+	return TweenInfo.new(t, style or EASE_Q, DIR_OUT)
+end
+local function tween(inst, info, goal)
+	TweenService:Create(inst, info, goal):Play()
+end
+
+local function playIntro()
+	introBusy = true
+	state = "open"
+	setPos(uiPos, WIN_SIZE)
+
+	local h = win.holder
+	local cx = uiPos.X + WIN_SIZE.X / 2
+	local capY = uiPos.Y + HEADER / 2
+	local fullY = uiPos.Y + WIN_SIZE.Y / 2
+
+	win.token += 1
+	win.canvas.GroupTransparency = 1
+	win.scale.Scale = 0.3
+	win.stroke.Transparency = 1
+	for _, c in win.corners do
+		c.CornerRadius = UDim.new(0, HEADER / 2)
+	end
+	h.Size = UDim2.fromOffset(10, 10)
+	h.Position = UDim2.fromOffset(cx, capY)
+	h.Visible = true
+	dragHeader.Visible = false
+
+	introCover.BackgroundTransparency = 0
+	bodyCover.BackgroundTransparency = 0
+	iconPop.Scale = 0.01
+	coinPop.Scale = 0.01
+	minPop.Scale = 0.01
+	closePop.Scale = 0.01
+	spinBoost.Value = 1
+
+	local titleEnd = {}
+	for i, l in titleLabels do
+		titleEnd[i] = l.Position
+		l.Position = l.Position - UDim2.fromOffset(36, 0)
+		l.MaxVisibleGraphemes = 0
+	end
+
+	tween(h, ti(0.55), { Size = UDim2.fromOffset(WIN_SIZE.X, HEADER) })
+	tween(win.scale, ti(0.5, EASE_B), { Scale = 1 })
+	tween(win.stroke, TweenInfo.new(0.15), { Transparency = 0 })
+	task.delay(0.35, function()
+		tween(win.canvas, ti(0.25, EASE_QUAD), { GroupTransparency = 0 })
+	end)
+
+	task.delay(0.6, function()
+		local total = utf8.len(titleLabels[1].Text) or 9
+		for i = 1, total do
+			for _, l in titleLabels do
+				l.MaxVisibleGraphemes = i
+			end
+			task.wait(0.075)
+		end
+		for _, l in titleLabels do
+			l.MaxVisibleGraphemes = -1
+		end
+	end)
+
+	task.delay(1.3, function()
+		for i, l in titleLabels do
+			tween(l, ti(0.6), { Position = titleEnd[i] })
+		end
+		tween(iconPop, ti(0.45, EASE_B), { Scale = 1 })
+	end)
+	task.delay(1.55, function()
+		tween(coinPop, ti(0.5, EASE_B), { Scale = 1 })
+		spinBoost.Value = 9
+		tween(spinBoost, TweenInfo.new(1.3, EASE_QUAD, DIR_OUT), { Value = 1 })
+	end)
+	task.delay(1.6, function()
+		tween(minPop, ti(0.35, EASE_B), { Scale = 1 })
+	end)
+	task.delay(1.7, function()
+		tween(closePop, ti(0.35, EASE_B), { Scale = 1 })
+	end)
+
+	task.delay(1.85, function()
+		tween(h, ti(0.85), {
+			Size = UDim2.fromOffset(WIN_SIZE.X, WIN_SIZE.Y),
+			Position = UDim2.fromOffset(cx, fullY),
+		})
+		for _, c in win.corners do
+			tween(c, ti(0.85), { CornerRadius = UDim.new(0, 8) })
+		end
+	end)
+	task.delay(1.95, function()
+		tween(introCover, ti(0.7, EASE_QUAD), { BackgroundTransparency = 1 })
+	end)
+	task.delay(2.15, function()
+		tween(bodyCover, ti(0.6, EASE_QUAD), { BackgroundTransparency = 1 })
+	end)
+
+	task.delay(INTRO_TOTAL, function()
+		h.Size = UDim2.fromOffset(WIN_SIZE.X, WIN_SIZE.Y)
+		h.Position = win:target()
+		for _, c in win.corners do
+			c.CornerRadius = UDim.new(0, 8)
+		end
+		for _, l in titleLabels do
+			l.MaxVisibleGraphemes = -1
+		end
+		introCover.Visible = false
+		bodyCover.Visible = false
+		dragHeader.Visible = true
+		introBusy = false
+	end)
+end
+
+gui.Destroying:Connect(function()
+	for _, c in conns do
+		c:Disconnect()
+	end
+	table.clear(conns)
+end)
+
+setPos((camera.ViewportSize - WIN_SIZE) / 2, WIN_SIZE)
+task.spawn(playIntro)
